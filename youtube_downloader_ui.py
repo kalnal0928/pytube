@@ -12,7 +12,7 @@ ctk.set_appearance_mode("System")  # "System", "Dark", "Light"
 ctk.set_default_color_theme("blue") # "blue", "green", "dark-blue"
 
 # --- 글꼴 설정 --- (여기서 쉽게 변경하세요)
-# 시스템에 설치된 폰트를 사용하거나, 프로그램 폴더에 폰트 파일(.ttf)을 넣고 경로를 지정할 수 있습니다.
+# 시스템에 설치된 폰트를 사용하거나, 프로그램 폴더에 폰트 파일(.ttf)을 넣고  ㅁㅁ경로를 지정할 수 있습니다.
 # 예: BASE_FONT = "c:/windows/fonts/malgun.ttf"
 BASE_FONT = "Malgun Gothic" # 기본 폰트
 TITLE_FONT_SIZE = 20
@@ -346,7 +346,6 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
                 'progress_hooks': [self.progress_hook],
                 'no_warnings': True,
                 'noprogress': True, # Disable default progress bar
-                'nocheckcertificate': True, # SSL 인증서 검증 비활성화
             }
 
             if quality == "bestaudio/best":
