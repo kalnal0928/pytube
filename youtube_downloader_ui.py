@@ -6,7 +6,7 @@ import os
 import sys
 import subprocess
 import webbrowser
-
+#모듈 업데이트 pip install --upgrade yt_dlp 
 # 테마 및 글꼴 설정
 ctk.set_appearance_mode("System")  # "System", "Dark", "Light"
 ctk.set_default_color_theme("blue") # "blue", "green", "dark-blue"
@@ -130,8 +130,8 @@ class YouTubeDownloaderUI(ctk.CTk):
 
         self.quality_var = ctk.StringVar(value="best")
         quality_options = [
-            ("최고 품질 (단일 파일) - 권장", "best", False),
-            ("최고 품질 (병합) - FFmpeg 필요", "bestvideo+bestaudio", True),
+            ("최고 품질 (단일 파일) - 권장", "best[ext=mp4]/best", False),
+            ("최고 품질 (병합) - FFmpeg 필요", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", True),
             ("720p HD", "best[height<=720]", False),
             ("480p", "best[height<=480]", False),
             ("음성만 (mp3) - FFmpeg 필요", "bestaudio/best", True)
@@ -346,6 +346,7 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
                 'progress_hooks': [self.progress_hook],
                 'no_warnings': True,
                 'noprogress': True, # Disable default progress bar
+                'nocheckcertificate': True, # SSL 인증서 검증 비활성화
             }
 
             if quality == "bestaudio/best":
