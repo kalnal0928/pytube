@@ -461,23 +461,21 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
                 
                 # 현재 줄에 내용이 있으면 새 줄로 이동
                 if current_line.strip():
-                    self.url_textbox.insert(cursor_pos, "\n")
-                    cursor_pos = self.url_textbox.index("insert")
+                    self.url_textbox.insert("insert", "\n")
                 
                 # URL과 줄바꿈을 한 번에 삽입
-                self.url_textbox.insert(cursor_pos, clipboard_text + "\n")
-                
-                # 포커스 유지
-                self.url_textbox.focus_set()
-                self.url_textbox.see("insert")
+                self.url_textbox.insert("insert", clipboard_text + "\n")
                 
                 # 다운로드 중이면 큐에 추가
                 if self.is_downloading:
                     self._add_to_download_queue(clipboard_text)
                 
                 # 번호 업데이트
-                self.after(10, self._update_url_numbers)
-                self.after(20, self._update_url_count)
+                self.after(1, self._update_url_numbers)
+                self.after(2, self._update_url_count)
+                
+                # 포커스 유지
+                self.url_textbox.focus_set()
                 
                 return "break"  # 기본 붙여넣기 동작 방지
             
@@ -490,7 +488,7 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
                 line_num = cursor_pos.split('.')[0]
                 current_line = self.url_textbox.get(f"{line_num}.0", f"{line_num}.end")
                 if current_line.strip():
-                    self.url_textbox.insert(cursor_pos, "\n")
+                    self.url_textbox.insert("insert", "\n")
                 
                 # 각 URL을 별도 줄에 삽입 (한 번에 처리)
                 urls_text = ""
@@ -506,13 +504,12 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
                 # 모든 URL과 마지막 줄바꿈을 한 번에 삽입
                 self.url_textbox.insert("insert", urls_text + "\n")
                 
+                # 번호 업데이트
+                self.after(1, self._update_url_numbers)
+                self.after(2, self._update_url_count)
+                
                 # 포커스 유지
                 self.url_textbox.focus_set()
-                self.url_textbox.see("insert")
-                
-                # 번호 업데이트
-                self.after(10, self._update_url_numbers)
-                self.after(20, self._update_url_count)
                 
                 return "break"  # 기본 붙여넣기 동작 방지
             
@@ -651,6 +648,37 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
         except Exception as e:
             pass
 
+    def _ensure_cursor_next_line(self):
+        """커서가 확실히 다음 줄로 이동하도록 보장"""
+        try:
+            # 전체 텍스트 가져오기
+            all_text = self.url_textbox.get("1.0", "end-1c")
+            lines = all_text.split('\n')
+            
+            # 마지막 줄이 비어있지 않으면 새 줄 추가
+            if lines and lines[-1].strip():
+                self.url_textbox.insert("end", "\n")
+            
+            # 커서를 텍스트의 맨 끝으로 이동
+            self.url_textbox.mark_set("insert", "end")
+            self.url_textbox.see("insert")
+            
+            # 포커스 설정
+            self.url_textbox.focus_set()
+                
+        except Exception as e:
+            pass
+
+    def _force_cursor_to_end(self):
+        """커서를 강제로 텍스트 끝으로 이동"""
+        try:
+            # 텍스트 끝으로 커서 이동
+            self.url_textbox.mark_set("insert", "end")
+            self.url_textbox.see("insert")
+            self.url_textbox.focus_set()
+        except Exception as e:
+            pass
+
     def _update_url_numbers(self):
         """URL 앞에 번호 추가"""
         try:
@@ -664,25 +692,29 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
             
             for line in lines:
                 line = line.strip()
-                if line and self._is_valid_youtube_url(line):
-                    url_count += 1
+                if line:
                     # 기존 번호 제거 (정규식으로)
                     import re
                     clean_line = re.sub(r'^\d+\.\s*', '', line)
-                    numbered_lines.append(f"{url_count}. {clean_line}")
-                elif line:  # 빈 줄이 아닌 경우
-                    numbered_lines.append(line)
+                    
+                    # 정리된 줄이 유효한 YouTube URL인지 확인
+                    if self._is_valid_youtube_url(clean_line):
+                        url_count += 1
+                        numbered_lines.append(f"{url_count}. {clean_line}")
+                    else:
+                        # URL이 아닌 경우 원래 줄 유지
+                        numbered_lines.append(line)
             
             # 텍스트 업데이트
             new_text = '\n'.join(numbered_lines)
             if new_text != current_text:
-                cursor_pos = self.url_textbox.index("insert")
+                # 텍스트 업데이트 후 커서를 끝으로 이동
                 self.url_textbox.delete("1.0", "end")
                 self.url_textbox.insert("1.0", new_text)
-                try:
-                    self.url_textbox.mark_set("insert", cursor_pos)
-                except:
-                    pass
+                
+                # 커서를 텍스트 끝으로 이동 (빈 줄이 있으면 그 줄로)
+                self.url_textbox.mark_set("insert", "end")
+                self.url_textbox.see("insert")
                     
         except Exception as e:
             pass
@@ -731,10 +763,35 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
             with self.queue_lock:
                 if url not in self.download_queue:
                     self.download_queue.append(url)
-                    self.log_message(f"📝 다운로드 큐에 추가됨: {url}")
-                    self.log_message(f"📋 현재 대기 중인 URL: {len(self.download_queue)}개")
+                    queue_count = len(self.download_queue)
+                    self.log_message(f"�  다운로드 큐에 추가됨: {url}")
+                    self.log_message(f"📋 현재 대기 중인 URL: {queue_count}개")
+                    
+                    # UI 진행률 표시 업데이트
+                    self._update_queue_display()
         except Exception as e:
             self.log_message(f"큐 추가 중 오류: {e}")
+
+    def _update_queue_display(self):
+        """큐 상태를 UI에 업데이트"""
+        try:
+            if self.is_downloading:
+                with self.queue_lock:
+                    queue_count = len(self.download_queue)
+                
+                # 현재 진행률 표시에 대기 개수 반영
+                current_text = self.current_progress_var.get()
+                if "대기:" in current_text:
+                    # 기존 대기 개수 부분을 새로운 개수로 교체
+                    import re
+                    new_text = re.sub(r'대기: \d+개', f'대기: {queue_count}개', current_text)
+                    self.current_progress_var.set(new_text)
+                else:
+                    # 대기 개수 정보가 없으면 추가
+                    if current_text:
+                        self.current_progress_var.set(f"{current_text} (대기: {queue_count}개)")
+        except Exception as e:
+            pass
 
     def _get_next_url_from_queue(self):
         """큐에서 다음 URL 가져오기"""
@@ -752,8 +809,16 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
         try:
             current_urls = self._parse_urls()
             with self.queue_lock:
-                # 기존 큐 초기화하고 현재 URL들로 재구성
-                self.download_queue = [url for url in current_urls if url not in self.download_queue]
+                # 새로운 URL들만 큐에 추가
+                new_urls = [url for url in current_urls if url not in self.download_queue]
+                if new_urls:
+                    self.download_queue.extend(new_urls)
+                    for url in new_urls:
+                        self.log_message(f"📝 키보드 입력으로 큐에 추가됨: {url}")
+                    self.log_message(f"📋 현재 대기 중인 URL: {len(self.download_queue)}개")
+                    
+                    # UI 진행률 표시 업데이트
+                    self._update_queue_display()
         except Exception as e:
             self.log_message(f"큐 동기화 중 오류: {e}")
 
