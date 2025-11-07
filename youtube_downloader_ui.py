@@ -37,6 +37,7 @@ class YouTubeDownloaderUI(ctk.CTk):
         
         # 동적 URL 큐 관리
         self.download_queue = []  # 다운로드 대기 중인 URL 목록
+        self.processed_urls = set()  # 이미 처리 중이거나 완료된 URL 목록
         self.is_downloading = False  # 다운로드 진행 중 여부
         self.queue_lock = Thread().lock if hasattr(Thread(), 'lock') else None
         from threading import Lock
@@ -204,7 +205,7 @@ class YouTubeDownloaderUI(ctk.CTk):
         info_frame = ctk.CTkFrame(parent, fg_color="transparent")
         info_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=(5, 0))
         
-        ctk.CTkLabel(info_frame, text="💡 한 줄에 하나씩 URL을 입력하세요", 
+        ctk.CTkLabel(info_frame, text="💡 Url 복사후 Ctrl + v 만 하면 다운로드 큐에 자동 추가", 
                     font=self.small_font, text_color="gray").grid(row=0, column=0, sticky="w")
         
         # URL 입력 텍스트박스 (테두리와 배경색 개선)
@@ -221,7 +222,7 @@ class YouTubeDownloaderUI(ctk.CTk):
         self.url_textbox.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=(5, 10))
         
         # 플레이스홀더 텍스트 설정
-        self.placeholder_text = "여기에 YouTube URL을 입력하세요...\n\n예시:\nhttps://www.youtube.com/watch?v=dQw4w9WgXcQ\nhttps://youtu.be/dQw4w9WgXcQ\nhttps://www.youtube.com/playlist?list=PLxxxxxx"
+        self.placeholder_text = "여기에 YouTube URL을 입력하세요...\nurl복사후 Ctrl + V 만~\n\n예시 형식:\nhttps://www.youtube.com/watch?v=VIDEO_ID"
         self.url_textbox.insert("1.0", self.placeholder_text)
         self.url_textbox.configure(text_color="gray")
         
@@ -260,6 +261,9 @@ class YouTubeDownloaderUI(ctk.CTk):
         self.browse_button = ctk.CTkButton(path_frame, text="찾아보기", width=100, command=self.browse_folder, font=self.body_font)
         self.browse_button.grid(row=0, column=1, padx=(10, 0))
 
+        self.open_folder_button = ctk.CTkButton(path_frame, text="📁 폴더 열기", width=100, command=self.open_download_folder, font=self.body_font, fg_color="green", hover_color="darkgreen")
+        self.open_folder_button.grid(row=0, column=2, padx=(10, 0))
+
     def _create_quality_options(self, parent):
         quality_frame = ctk.CTkFrame(parent)
         quality_frame.grid(row=5, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 10))
@@ -267,7 +271,7 @@ class YouTubeDownloaderUI(ctk.CTk):
         
         ctk.CTkLabel(quality_frame, text="품질 설정", font=ctk.CTkFont(family=BASE_FONT, size=BODY_FONT_SIZE, weight="bold")).grid(row=0, column=0, sticky="w", padx=10, pady=(5,5))
 
-        self.quality_var = ctk.StringVar(value="best")
+        self.quality_var = ctk.StringVar(value="bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
         quality_options = [
             ("최고 품질 (단일 파일) - 권장", "best[ext=mp4]/best", False),
             ("최고 품질 (병합) - FFmpeg 필요", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", True),
@@ -404,6 +408,31 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
         folder = filedialog.askdirectory()
         if folder:
             self.path_var.set(folder)
+
+    def open_download_folder(self):
+        """다운로드 폴더를 파일 탐색기에서 열기"""
+        try:
+            download_path = self.path_var.get()
+            
+            # 폴더가 존재하지 않으면 생성
+            if not os.path.exists(download_path):
+                os.makedirs(download_path, exist_ok=True)
+                self.log_message(f"📁 다운로드 폴더를 생성했습니다: {download_path}")
+            
+            # Windows에서 폴더 열기
+            if os.name == 'nt':  # Windows
+                os.startfile(download_path)
+            elif os.name == 'posix':  # macOS, Linux
+                if sys.platform == 'darwin':  # macOS
+                    subprocess.run(['open', download_path])
+                else:  # Linux
+                    subprocess.run(['xdg-open', download_path])
+            
+            self.log_message(f"📂 다운로드 폴더를 열었습니다: {download_path}")
+            
+        except Exception as e:
+            self.log_message(f"❌ 폴더 열기 오류: {e}")
+            messagebox.showerror("오류", f"폴더를 열 수 없습니다.\n{e}")
 
     def clear_log(self):
         """로그 텍스트 지우기"""
@@ -761,24 +790,29 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
         """다운로드 큐에 URL 추가"""
         try:
             with self.queue_lock:
-                if url not in self.download_queue:
+                # 이미 큐에 있거나 처리 중인 URL은 추가하지 않음
+                if url not in self.download_queue and url not in self.processed_urls:
                     self.download_queue.append(url)
                     queue_count = len(self.download_queue)
                     self.log_message(f"�  다운로드 큐에 추가됨: {url}")
                     self.log_message(f"📋 현재 대기 중인 URL: {queue_count}개")
                     
-                    # UI 진행률 표시 업데이트
-                    self._update_queue_display()
+                    # UI 진행률 표시 업데이트 (락 해제 후 안전하게)
+                    self.after(1, lambda count=queue_count: self._update_queue_display_safe(count))
+                else:
+                    self.log_message(f"⚠️ 이미 처리 중이거나 대기 중인 URL: {url}")
         except Exception as e:
             self.log_message(f"큐 추가 중 오류: {e}")
 
     def _update_queue_display(self):
-        """큐 상태를 UI에 업데이트"""
+        """큐 상태를 UI에 업데이트 (사용 중단 - _update_queue_display_safe 사용)"""
+        # 이 함수는 데드락을 방지하기 위해 사용하지 않음
+        pass
+
+    def _update_queue_display_safe(self, queue_count):
+        """락 없이 안전하게 큐 상태를 UI에 업데이트"""
         try:
             if self.is_downloading:
-                with self.queue_lock:
-                    queue_count = len(self.download_queue)
-                
                 # 현재 진행률 표시에 대기 개수 반영
                 current_text = self.current_progress_var.get()
                 if "대기:" in current_text:
@@ -798,7 +832,10 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
         try:
             with self.queue_lock:
                 if self.download_queue:
-                    return self.download_queue.pop(0)
+                    url = self.download_queue.pop(0)
+                    # 처리 중인 URL로 표시
+                    self.processed_urls.add(url)
+                    return url
                 return None
         except Exception as e:
             self.log_message(f"큐에서 URL 가져오기 오류: {e}")
@@ -807,18 +844,29 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
     def _update_queue_from_textbox(self):
         """텍스트박스의 URL들을 큐에 동기화"""
         try:
+            # 다운로드가 진행 중이 아니면 큐 업데이트 하지 않음
+            if not self.is_downloading:
+                return
+                
             current_urls = self._parse_urls()
+            
+            # 현재 텍스트박스가 비어있거나 플레이스홀더 상태면 큐 업데이트 하지 않음
+            if not current_urls:
+                return
+                
             with self.queue_lock:
-                # 새로운 URL들만 큐에 추가
-                new_urls = [url for url in current_urls if url not in self.download_queue]
+                # 새로운 URL들만 큐에 추가 (이미 처리 중이거나 완료된 URL 제외)
+                new_urls = [url for url in current_urls 
+                           if url not in self.download_queue and url not in self.processed_urls]
                 if new_urls:
                     self.download_queue.extend(new_urls)
                     for url in new_urls:
                         self.log_message(f"📝 키보드 입력으로 큐에 추가됨: {url}")
-                    self.log_message(f"📋 현재 대기 중인 URL: {len(self.download_queue)}개")
+                    queue_count = len(self.download_queue)
+                    self.log_message(f"📋 현재 대기 중인 URL: {queue_count}개")
                     
-                    # UI 진행률 표시 업데이트
-                    self._update_queue_display()
+                    # UI 진행률 표시 업데이트 (락 해제 후 안전하게)
+                    self.after(1, lambda count=queue_count: self._update_queue_display_safe(count))
         except Exception as e:
             self.log_message(f"큐 동기화 중 오류: {e}")
 
@@ -827,8 +875,11 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
         # 키 입력 후 번호 업데이트 (딜레이를 두어 타이핑 중 과도한 업데이트 방지)
         if event and hasattr(event, 'keysym'):
             self.after(500, self._update_url_numbers)
-            # 다운로드 중이면 큐도 업데이트
-            if self.is_downloading:
+            # 다운로드 중이고 실제 키보드 입력이 있을 때만 큐 업데이트
+            if (self.is_downloading and 
+                hasattr(event, 'char') and 
+                event.char and 
+                event.char.isprintable()):
                 self.after(1000, self._update_queue_from_textbox)
         
         urls = self._parse_urls()
@@ -845,25 +896,50 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
         lines = content.split('\n')
         urls = []
         
+        # 디버깅: 전체 텍스트 내용 로깅
+        self.log_message(f"🔍 텍스트박스 내용 분석 중... (총 {len(lines)}줄)")
+        
         for line in lines:
             line = line.strip()
-            if line:
+            # 예시 텍스트나 플레이스홀더 라인들 완전히 제외
+            if (line and 
+                not line.startswith("여기에") and 
+                not line.startswith("예시") and
+                "형식:" not in line and
+                "VIDEO_ID" not in line and
+                "PLAYLIST_ID" not in line):
+                
                 # 번호 제거하고 URL만 추출
                 import re
                 clean_line = re.sub(r'^\d+\.\s*', '', line)
-                if self._is_valid_youtube_url(clean_line):
+                
+                # 유효한 YouTube URL인지 확인 (이미 예시 텍스트는 _is_valid_youtube_url에서 필터링됨)
+                if clean_line and self._is_valid_youtube_url(clean_line):
                     urls.append(clean_line)
+                    self.log_message(f"✅ 유효한 URL 추가: {clean_line}")
+                elif clean_line:
+                    self.log_message(f"❌ 무효한 URL 제외: {clean_line}")
         
+        self.log_message(f"📋 최종 파싱 결과: {len(urls)}개의 유효한 URL")
         return urls
 
     def _is_valid_youtube_url(self, url):
         """YouTube URL 유효성 검사"""
+        # 예시 텍스트나 플레이스홀더는 무조건 제외
+        if (not url or 
+            "VIDEO_ID" in url or 
+            "PLAYLIST_ID" in url or
+            url.startswith("여기에") or
+            url.startswith("예시") or
+            "형식:" in url):
+            return False
+            
         youtube_patterns = [
-            r'https?://(?:www\.)?youtube\.com/watch\?v=[\w-]+',
-            r'https?://(?:www\.)?youtu\.be/[\w-]+',
+            r'https?://(?:www\.)?youtube\.com/watch\?v=[\w-]{11}',  # YouTube 비디오 ID는 정확히 11자
+            r'https?://(?:www\.)?youtu\.be/[\w-]{11}',  # 단축 URL도 11자
             r'https?://(?:www\.)?youtube\.com/playlist\?list=[\w-]+',
-            r'https?://(?:www\.)?youtube\.com/shorts/[\w-]+',
-            r'https?://(?:m\.)?youtube\.com/watch\?v=[\w-]+',
+            r'https?://(?:www\.)?youtube\.com/shorts/[\w-]{11}',
+            r'https?://(?:m\.)?youtube\.com/watch\?v=[\w-]{11}',
         ]
         
         import re
@@ -1027,6 +1103,12 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
         self.update_idletasks()
 
     def start_download(self):
+        # 텍스트박스 내용이 플레이스홀더인지 확인
+        current_text = self.url_textbox.get("1.0", "end-1c").strip()
+        if current_text == self.placeholder_text or current_text.startswith("여기에 YouTube URL을"):
+            messagebox.showwarning("알림", "먼저 YouTube URL을 입력해주세요.\n예시 텍스트를 지우고 실제 URL을 입력하세요.")
+            return
+        
         urls = self._parse_urls()
         if not urls:
             messagebox.showerror("오류", "유효한 YouTube URL을 입력해주세요.")
@@ -1053,6 +1135,8 @@ FFmpeg는 비디오와 오디오를 처리하는 강력한 오픈소스 프로�
         # 다운로드 큐 초기화
         with self.queue_lock:
             self.download_queue = urls.copy()
+            # 처리된 URL 목록 초기화
+            self.processed_urls.clear()
         
         self._set_ui_state(is_downloading=True)
         self.is_downloading = True
